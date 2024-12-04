@@ -222,14 +222,14 @@ def SDE_step(matrix, init_matrix, dt, num):
             new_y = y_0 - dt*(2*y_0-2*y_sum)+np.sqrt(2)*B_y
             if new_x < 0:
                 new_x = 0
-            elif new_x > dim1:
-                new_x = dim1
+            elif new_x >= dim1-0.5:
+                new_x = dim1-1
             else:
                 new_x = np.round(new_x,0)
             if new_y < 0:
                 new_y = 0
-            elif new_y > dim2:
-                new_y = dim2
+            elif new_y >= dim2-0.5:
+                new_y = dim2-1
             else:
                 new_y = np.round(new_y,0)
             new_counts[(new_x,new_y)]+=1
@@ -280,21 +280,103 @@ def SDE_from_sample(sample, init_matrix, dt):
             new_y = y_0 - dt*(2*y_0-2*y_sum)+np.sqrt(2)*B_y
             if new_x < 0:
                 new_x = 0
-            elif new_x > dim1:
-                new_x = dim1
+            elif new_x >= dim1-0.5:
+                new_x = dim1-1
             else:
                 new_x = np.round(new_x,0)
             if new_y < 0:
                 new_y = 0
-            elif new_y > dim2:
-                new_y = dim2
+            elif new_y >= dim2-0.5:
+                new_y = dim2-1
             else:
                 new_y = np.round(new_y,0)
             new_counts[(new_x,new_y)]+=1
     return new_counts
 
+"""Like SDE_step, but with no drift term (i.e. no optimal transport). 
+Only moves particles according to Brownian motion. """
+def BM_step(matrix, init_matrix, dt, num):
+    ### Initializing list of squares, current & original probabilities, initial sample, and dictionary for output sample.
+    squares = []
+    probabilities = []
+    prob_og = []
+    counts = {}
+    new_counts = {}
+    for i in range(dim1):
+        for j in range(dim2):
+            squares.append((i,j))
+            probabilities.append(matrix[i,j])
+            counts[(i,j)] = 0
+            new_counts[(i,j)] = 0
+            prob_og.append(init_matrix[i,j])
 
-            
+    ### Initializing sample from probability matrix
+    sample = np.random.choice(len(squares), num, p=probabilities)
+    for index, val in enumerate(sample):
+        counts[squares[val]] += 1
+    
+    ### Moving each particle according to Brownian motion
+    for index, square in enumerate(squares):
+        for _ in range(counts[square]):
+            x_0 = square[0]
+            y_0 = square[1]
+            B_x = np.random.normal(0,dt)
+            B_y = np.random.normal(0,dt)
+            new_x = x_0 + np.sqrt(2)*B_x
+            new_y = y_0 + np.sqrt(2)*B_y
+            if new_x < 0:
+                new_x = 0
+            elif new_x >= dim1-0.5:
+                new_x = dim1-1
+            else:
+                new_x = np.round(new_x,0)
+            if new_y < 0:
+                new_y = 0
+            elif new_y >= dim2-0.5:
+                new_y = dim2-1
+            else:
+                new_y = np.round(new_y,0)
+            new_counts[(new_x,new_y)]+=1
+
+    return new_counts
+
+
+
+def BM_from_sample(sample, dt):
+    ### Initializing list of squares and new_counts dictionary. 
+    squares = []
+    new_counts = {}
+    for i in range(dim1):
+        for j in range(dim2):
+            squares.append((i,j))
+            new_counts[(i,j)] = 0
+    
+    ### Moving each particle according to Brownian motion
+    for index, square in enumerate(squares):
+        for _ in range(sample[square]):
+            x_0 = square[0]
+            y_0 = square[1]
+            B_x = np.random.normal(0,dt)
+            B_y = np.random.normal(0,dt)
+            new_x = x_0 + np.sqrt(2)*B_x
+            new_y = y_0 + np.sqrt(2)*B_y
+            if new_x < 0:
+                new_x = 0
+            elif new_x >= dim1-0.5:
+                new_x = dim1-1
+            else:
+                new_x = np.round(new_x,0)
+            if new_y < 0:
+                new_y = 0
+            elif new_y > dim2-0.5:
+                new_y = dim2-1
+            else:
+                new_y = np.round(new_y,0)
+            new_counts[(new_x,new_y)]+=1
+
+    return new_counts
+    
+    
         
 
 """
@@ -337,17 +419,17 @@ seventh_step = PDE_step(sixth_step, init_img, 0.02)"""
 ###show_sample(init_img, 3000)
 
 
-first_step = SDE_step(init_img,init_img,1,1500)
-second_step = SDE_from_sample(first_step, init_img, 1)
-third_step = SDE_from_sample(second_step, init_img, 1)
-fourth_step = SDE_from_sample(third_step, init_img, 1)
+first_step = BM_step(init_img,init_img,0.5,3000)
+second_step = BM_from_sample(first_step, 0.5)
+### third_step = SDE_from_sample(second_step, init_img, 1)
+### fourth_step = SDE_from_sample(third_step, init_img, 1)
 
 ### showing particles after three SDE steps
 new_matrix = np.matrix(np.ones([dim1,dim2]))
 distinct = 0
 for i in range(dim1):
         for j in range(dim2):
-            if fourth_step[(i,j)] > 0:
+            if second_step[(i,j)] > 0:
                 new_matrix[i,j] = 0
                 distinct +=1
             else:
