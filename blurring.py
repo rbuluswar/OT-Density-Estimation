@@ -377,48 +377,40 @@ def BM_from_sample(sample, dt):
     return new_counts
     
     
-        
+"""Given to matrices, want to visualize the coupling by seeing where the probability mass at a given index (i,j) is sent. 
+The distribution is visualized by a sample of size num. """    
+### Good example for spiral: i = 35, j = 38. Generally, look for something in the support of [matrix].
+def see_coupling(matrix, init_matrix, i_coord, j_coord, num):
+    new_matrix = np.matrix(np.ones([dim1,dim2]))
+    squares = []
+    prob_curr = []
+    prob_og = []
+    for i in range(dim1):
+        for j in range(dim2):
+            squares.append((i,j))
+            prob_curr.append(matrix[i,j])
+            prob_og.append(init_matrix[i,j])
+    cost_matrix = np.matrix((np.ones([dim1*dim2,dim1*dim2])))
+    for (index_1, (i,j)) in enumerate(squares):
+        for (index_2, (a,b)) in enumerate(squares):
+            cost_matrix[index_1,index_2] = np.sqrt((a-i)**2+(b-j)**2)
+    T = ot.emd(prob_curr,prob_og,cost_matrix)
+    index = squares.index((i_coord,j_coord))
+    print(index)
+    row = T[index]
+    x_sum = 0
+    y_sum = 0
+    if row.sum() > 0: 
+        for index, (i,j) in enumerate(squares):
+            new_matrix[i,j] = row[index]/row.sum()
+        show_sample(new_matrix, num)
+    elif row.sum()==0:
+        print('Choose a different index')
 
+
+
+### TESTING BELOW
 """
-### Visualizing one row of coupling 
-matrix = PDE_step(init_img,init_img,0.01)
-init_matrix = init_img
-new_matrix = np.matrix(np.ones([dim1,dim2]))
-squares = []
-prob_curr = []
-prob_og = []
-for i in range(dim1):
-    for j in range(dim2):
-        squares.append((i,j))
-        prob_curr.append(matrix[i,j])
-        prob_og.append(init_matrix[i,j])
-cost_matrix = np.matrix((np.ones([dim1*dim2,dim1*dim2])))
-for (index_1, (i,j)) in enumerate(squares):
-    for (index_2, (a,b)) in enumerate(squares):
-        cost_matrix[index_1,index_2] = np.sqrt((a-i)**2+(b-j)**2)
-T = ot.emd(prob_curr,prob_og,cost_matrix)
-index = squares.index((35,23))
-row = T[index]
-x_sum = 0
-y_sum = 0
-if row.sum() > 0: 
-    for index, (i,j) in enumerate(squares):
-        new_matrix[i,j] = row[index]/row.sum()
-
-show_sample(new_matrix, 16000)"""
-
-
-### Some steps along the PDE 
-### first_step = PDE_step(init_img,init_img, 0.02)
-"""second_step = PDE_step(first_step, init_img, 0.02)
-third_step = PDE_step(second_step, init_img, 0.02)
-fourth_step = PDE_step(third_step, init_img, 0.02)
-fifth_step = PDE_step(fourth_step, init_img, 0.02)
-sixth_step = PDE_step(fifth_step, init_img, 0.02)
-seventh_step = PDE_step(sixth_step, init_img, 0.02)"""
-###show_sample(init_img, 3000)
-
-
 first_step = BM_step(init_img,init_img,0.5,3000)
 second_step = BM_from_sample(first_step, 0.5)
 ### third_step = SDE_from_sample(second_step, init_img, 1)
@@ -437,6 +429,6 @@ for i in range(dim1):
 print(distinct)
 cv2.imshow("photo", new_matrix)
 cv2.waitKey(0)
-cv2.destroyAllWindows()
+cv2.destroyAllWindows()"""
 
 
