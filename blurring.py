@@ -174,7 +174,7 @@ def PDE_step(matrix, init_matrix, dt):
     return(new_matrix)
 
 """"Takes as an input a probability matrix, initial matrix, and a step size and returns a sample from a distribution after taking one step of discretized SDE.""" 
-def SDE_step(matrix, init_matrix, dt, num):
+def SDE_step(matrix, init_matrix, dt, num, lam):
     ### Initializing list of squares, current & original probabilities, initial sample, and dictionary for output sample.
     squares = []
     probabilities = []
@@ -218,8 +218,8 @@ def SDE_step(matrix, init_matrix, dt, num):
                 for index, (i,j) in enumerate(squares):
                     x_sum += (row[index]*i)/row.sum()
                     y_sum += (row[index]*j)/row.sum()
-            new_x = x_0 - dt*(2*x_0-2*x_sum)+np.sqrt(2)*B_x
-            new_y = y_0 - dt*(2*y_0-2*y_sum)+np.sqrt(2)*B_y
+            new_x = x_0 - lam*dt*(2*x_0-2*x_sum)+np.sqrt(2)*B_x
+            new_y = y_0 - lam*dt*(2*y_0-2*y_sum)+np.sqrt(2)*B_y
             if new_x < 0:
                 new_x = 0
             elif new_x >= dim1-0.5:
@@ -236,7 +236,7 @@ def SDE_step(matrix, init_matrix, dt, num):
     return new_counts
 
 """Performs one step of the SDE given a matrix of particle locations (dictionary) instead of a probability matrix. """
-def SDE_from_sample(sample, init_matrix, dt):
+def SDE_from_sample(sample, init_matrix, dt, lam):
     ### Initializing list of squares, deriving probability matrix from sample. 
     ### Initializing current and initial probability distributions, and new counts dictionary.
     squares = []
@@ -276,8 +276,8 @@ def SDE_from_sample(sample, init_matrix, dt):
                 for index, (i,j) in enumerate(squares):
                     x_sum += (row[index]*i)/row.sum()
                     y_sum += (row[index]*j)/row.sum()
-            new_x = x_0 - dt*(2*x_0-2*x_sum)+np.sqrt(2)*B_x
-            new_y = y_0 - dt*(2*y_0-2*y_sum)+np.sqrt(2)*B_y
+            new_x = x_0 - lam*dt*(2*x_0-2*x_sum)+np.sqrt(2)*B_x
+            new_y = y_0 - lam*dt*(2*y_0-2*y_sum)+np.sqrt(2)*B_y
             if new_x < 0:
                 new_x = 0
             elif new_x >= dim1-0.5:
@@ -410,18 +410,18 @@ def see_coupling(matrix, init_matrix, i_coord, j_coord, num):
 
 
 ### TESTING BELOW
-"""
-first_step = BM_step(init_img,init_img,0.5,3000)
-second_step = BM_from_sample(first_step, 0.5)
-### third_step = SDE_from_sample(second_step, init_img, 1)
-### fourth_step = SDE_from_sample(third_step, init_img, 1)
+
+first_step = SDE_step(init_img,init_img,0.05,3000, 1)
+second_step = SDE_from_sample(first_step, init_img, 0.05, 1)
+third_step = SDE_from_sample(second_step, init_img, 0.05, 1)
+fourth_step = SDE_from_sample(third_step, init_img, 0.05, 1)
 
 ### showing particles after three SDE steps
 new_matrix = np.matrix(np.ones([dim1,dim2]))
 distinct = 0
 for i in range(dim1):
         for j in range(dim2):
-            if second_step[(i,j)] > 0:
+            if fourth_step[(i,j)] > 0:
                 new_matrix[i,j] = 0
                 distinct +=1
             else:
@@ -429,6 +429,5 @@ for i in range(dim1):
 print(distinct)
 cv2.imshow("photo", new_matrix)
 cv2.waitKey(0)
-cv2.destroyAllWindows()"""
-
+cv2.destroyAllWindows()
 
