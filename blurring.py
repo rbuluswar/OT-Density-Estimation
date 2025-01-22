@@ -408,26 +408,77 @@ def see_coupling(matrix, init_matrix, i_coord, j_coord, num):
         print('Choose a different index')
 
 
-
-### TESTING BELOW
-
-first_step = SDE_step(init_img,init_img,0.05,3000, 1)
-second_step = SDE_from_sample(first_step, init_img, 0.05, 1)
-third_step = SDE_from_sample(second_step, init_img, 0.05, 1)
-fourth_step = SDE_from_sample(third_step, init_img, 0.05, 1)
-
-### showing particles after three SDE steps
-new_matrix = np.matrix(np.ones([dim1,dim2]))
-distinct = 0
-for i in range(dim1):
+### Given an initial matrix representing a sample from a distribution, init_matrix,
+### a step size dt, a weighting parameter lam, a number of steps, and a factor of N
+### for scaling up the sample, takes steps according to SDE_from_sample and returns the matrix of particles.
+### All sample matrices represented as dictionaries.
+def simulate_SDE(prob_matrix, init_sample, dt, lam, steps, N):
+    init_matrix_dict = {}
+    for i in range(dim1):
         for j in range(dim2):
-            if fourth_step[(i,j)] > 0:
-                new_matrix[i,j] = 0
-                distinct +=1
-            else:
-                new_matrix[i,j] = 255
-print(distinct)
-cv2.imshow("photo", new_matrix)
-cv2.waitKey(0)
-cv2.destroyAllWindows()
+            init_matrix_dict[(i,j)] =init_sample[i,j] * N
+    new_matrix_dict = init_matrix_dict
+    for _ in range(steps):
+        updated_matrix = SDE_from_sample(new_matrix_dict, prob_matrix, dt, lam)
+        new_matrix_dict = updated_matrix 
+    return new_matrix_dict
+
+
+
+### Given a probability matrix, takes a sample of size m and performs simulate_SDE.
+### Then shows final result and prints OT distance between prob_matrix and 
+### empirical sample, and between prob_matrix and output empirical distribution.
+
+def test_SDE(prob_matrix, dt, lam, steps, N, m):
+    ### Take sample from prob_matrix
+    squares = []
+    probabilities = []
+    counts = {}
+    for i in range(dim1):
+        for j in range(dim2):
+            squares.append((i,j))
+            probabilities.append(prob_matrix[i,j])
+            counts[(i,j)] = 0
+    sample = np.random.choice(len(squares), m, p=probabilities)
+    for index, val in enumerate(sample):
+        counts[squares[val]] += 1
+    
+    init_matrix = np.matrix((np.ones([dim1,dim2])))
+    for i in range(dim1):
+        for j in range(dim2):
+            init_matrix[i,j] = counts[(i,j)]
+    
+    output_matrix = simulate_SDE(prob_matrix, counts, dt, lam, steps, N)
+    
+    ### Initialize cost matrix
+    cost_matrix = np.matrix((np.ones([dim1*dim2,dim1*dim2])))
+    for (index_1, (i,j)) in enumerate(squares):
+        for (index_2, (a,b)) in enumerate(squares):
+            cost_matrix[index_1,index_2] = np.sqrt((a-i)**2+(b-j)**2)
+    
+    ### Turn original sample and output sample into probability distributions
+    og_emp = []
+    output_emp = []
+    prob_list = []
+    for i in range(dim1):
+        for j in range(dim2):
+            og_emp.append(counts[(i,j)] / m)  
+            output_emp.append(output_matrix[(i,j)]/(N*m))
+            prob_list.append(prob_matrix[i,j])
+    
+    og_dist = ot.emd2(prob_list, og_emp, cost_matrix)
+    new_dist = ot.emd2(prob_list, output_emp, cost_matrix)
+    change = (new_dist-og_dist) / og_dist
+    print("Original OT distance: "+ str(og_dist))
+    print("New OT distance: " +str(new_dist))
+    print("percentage change = " + str(100*change))
+    return output_matrix
+
+
+
+
+
+
+
+
 
