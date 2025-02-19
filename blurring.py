@@ -1,24 +1,28 @@
 import numpy as np
 import cv2
 import ot
+import math
+import matplotlib.pyplot as plt
+from ot.utils import *
 
 
 """Initializing the image."""
 img_path = "/Users/rohanbuluswar/Desktop/CS_Research/Spiral.png"
 img = cv2.imread(img_path, 0)
-dim1 = 75
-dim2 = 75
+dim1 = 64
+dim2 = 64
 img = cv2.resize(img, (dim1,dim2))
 
 
+
 """Given an initial image, properly formats it as probability distribution matrix with lighter region corresponding to lower density. """
-reverse_img = np.matrix(np.ones([dim1,dim2]))
+reverse_img = np.ones([dim1,dim2])
 for x in range(dim1):
     for y in range(dim2):
         reverse_img[x,y] = (255-img[x,y])
 
 tot = np.sum(reverse_img)
-init_img = np.matrix(np.ones([dim1,dim2]))
+init_img = np.ones([dim1,dim2])
 for x in range(dim1):
     for y in range(dim2):
         init_img[x,y] = reverse_img[x,y]/tot
@@ -32,7 +36,7 @@ for x in range(dim1):
 Displaying color/darkness as density relative to maximum, or simply as proportional to the  density itself.
 The first option leaves the uniform distribution as completely black, while the second option leaves it completely white."""
 def show_photo(matrix):
-    new_matrix = np.matrix(np.ones([dim1,dim2]))
+    new_matrix = np.ones([dim1,dim2])
     for x in range(dim1):
         for y in range(dim2):
             new_matrix[x,y] = (1-matrix[x,y]/np.max(matrix))
@@ -60,7 +64,7 @@ def show_sample(matrix, num):
     sample = np.random.choice(len(squares), num, p=probabilities)
     for index, val in enumerate(sample):
         counts[squares[val]] += 1
-    new_matrix = np.matrix(np.ones([dim1,dim2]))
+    new_matrix = np.ones([dim1,dim2])
     m = max(counts.values())
 
     for i in range(dim1):
@@ -79,7 +83,7 @@ def PDE_step(matrix, init_matrix, dt):
     squares = []
     prob_curr = []
     prob_og = []
-    new_matrix = np.matrix(np.ones([dim1,dim2]))
+    new_matrix = np.ones([dim1,dim2])
 
 ### Construct list of indices representing squares in our grid, and initial and current probability distributions 
     for i in range(dim1):
@@ -90,15 +94,15 @@ def PDE_step(matrix, init_matrix, dt):
 
 ### Construct cost matrix representing transport cost from each square in our grid to each other square
 
-    cost_matrix = np.matrix((np.ones([dim1*dim2,dim1*dim2])))
+    cost_matrix = np.ones([dim1*dim2,dim1*dim2])
     for (index_1, (i,j)) in enumerate(squares):
         for (index_2, (a,b)) in enumerate(squares):
             cost_matrix[index_1,index_2] = np.sqrt((a-i)**2+(b-j)**2)
 
 ### Solve optimal transport to obtain coupling matrix, define intermediate step matrix (of which we will take the divergence)
     T = ot.emd(prob_curr,prob_og,cost_matrix)
-    x_inter_matrix = np.matrix(np.ones([dim1,dim2]))
-    y_inter_matrix = np.matrix(np.ones([dim1,dim2]))
+    x_inter_matrix = np.ones([dim1,dim2])
+    y_inter_matrix = np.ones([dim1,dim2])
 
 ### Do calculation or grad_log and estimate transport map to find intermediate step matrix
     for i in range(dim1):
@@ -190,7 +194,7 @@ def SDE_step(matrix, init_matrix, dt, num, lam):
             prob_og.append(init_matrix[i,j])
 
     ### Initializing cost matrix and solving optimal transport
-    cost_matrix = np.matrix((np.ones([dim1*dim2,dim1*dim2])))
+    cost_matrix = np.ones([dim1*dim2,dim1*dim2])
     for (index_1, (i,j)) in enumerate(squares):
         for (index_2, (a,b)) in enumerate(squares):
             cost_matrix[index_1,index_2] = np.sqrt((a-i)**2+(b-j)**2)
@@ -235,6 +239,69 @@ def SDE_step(matrix, init_matrix, dt, num, lam):
             new_counts[(new_x,new_y)]+=1
     return new_counts
 
+
+"""Like SDE_step, but with entropy-regularized optimal transport."""
+def entropic_SDE_step(matrix, init_matrix, dt, num, lam):
+    ### Initializing list of squares, current & original probabilities, initial sample, and dictionary for output sample.
+    squares = []
+    probabilities = []
+    prob_og = []
+    counts = {}
+    new_counts = {}
+    for i in range(dim1):
+        for j in range(dim2):
+            squares.append((i,j))
+            probabilities.append(matrix[i,j])
+            counts[(i,j)] = 0
+            new_counts[(i,j)] = 0
+            prob_og.append(init_matrix[i,j])
+
+    ### Initializing cost matrix and solving optimal transport
+    cost_matrix = np.ones([dim1*dim2,dim1*dim2])
+    for (index_1, (i,j)) in enumerate(squares):
+        for (index_2, (a,b)) in enumerate(squares):
+            cost_matrix[index_1,index_2] = np.sqrt((a-i)**2+(b-j)**2)
+    T = ot.sinkhorn(probabilities,prob_og,cost_matrix, 1)
+
+    ### Initializing sample from current prob. distribution
+    sample = np.random.choice(len(squares), num, p=probabilities)
+    for index, val in enumerate(sample):
+        counts[squares[val]] += 1
+    
+    ### Moving each particle 
+    for index, square in enumerate(squares):
+        for _ in range(counts[square]):
+            x_0 = square[0]
+            y_0 = square[1]
+            B_x = np.random.normal(0,dt)
+            B_y = np.random.normal(0,dt)
+            row = T[index]
+            x_sum = 0
+            y_sum = 0
+            if row.sum() == 0:
+                x_sum = x_0
+                y_sum = y_0
+            elif row.sum() > 0 : 
+                for index, (i,j) in enumerate(squares):
+                    x_sum += (row[index]*i)/row.sum()
+                    y_sum += (row[index]*j)/row.sum()
+            new_x = x_0 - lam*dt*(2*x_0-2*x_sum)+np.sqrt(2)*B_x
+            new_y = y_0 - lam*dt*(2*y_0-2*y_sum)+np.sqrt(2)*B_y
+            if new_x < 0:
+                new_x = 0
+            elif new_x >= dim1-0.5:
+                new_x = dim1-1
+            else:
+                new_x = np.round(new_x,0)
+            if new_y < 0:
+                new_y = 0
+            elif new_y >= dim2-0.5:
+                new_y = dim2-1
+            else:
+                new_y = np.round(new_y,0)
+            new_counts[(new_x,new_y)]+=1
+    return new_counts    
+
 """Performs one step of the SDE given a matrix of particle locations (dictionary) instead of a probability matrix. """
 def SDE_from_sample(sample, init_matrix, dt, lam):
     ### Initializing list of squares, deriving probability matrix from sample. 
@@ -253,11 +320,70 @@ def SDE_from_sample(sample, init_matrix, dt, lam):
         curr_prob.append(sample[val] / total)
 
     ### Initializing cost matrix and solving optimal transport
-    cost_matrix = np.matrix((np.ones([dim1*dim2,dim1*dim2])))
+    cost_matrix = np.ones([dim1*dim2,dim1*dim2])
     for (index_1, (i,j)) in enumerate(squares):
         for (index_2, (a,b)) in enumerate(squares):
             cost_matrix[index_1,index_2] = np.sqrt((a-i)**2+(b-j)**2)
     T = ot.emd(curr_prob,prob_og,cost_matrix)
+
+    ### Moving each particle 
+    for index, square in enumerate(squares):
+        for _ in range(sample[square]):
+            x_0 = square[0]
+            y_0 = square[1]
+            B_x = np.random.normal(0,dt)
+            B_y = np.random.normal(0,dt)
+            row = T[index]
+            x_sum = 0
+            y_sum = 0
+            if row.sum() == 0:
+                x_sum = x_0
+                y_sum = y_0
+            elif row.sum() > 0 : 
+                for index, (i,j) in enumerate(squares):
+                    x_sum += (row[index]*i)/row.sum()
+                    y_sum += (row[index]*j)/row.sum()
+            new_x = x_0 - lam*dt*(2*x_0-2*x_sum)+np.sqrt(2)*B_x
+            new_y = y_0 - lam*dt*(2*y_0-2*y_sum)+np.sqrt(2)*B_y
+            if new_x < 0:
+                new_x = 0
+            elif new_x >= dim1-0.5:
+                new_x = dim1-1
+            else:
+                new_x = np.round(new_x,0)
+            if new_y < 0:
+                new_y = 0
+            elif new_y >= dim2-0.5:
+                new_y = dim2-1
+            else:
+                new_y = np.round(new_y,0)
+            new_counts[(new_x,new_y)]+=1
+    return new_counts
+
+
+"""Like SDE_from_sample, but with entropic regularization. """
+def entropic_SDE_from_sample(sample, init_matrix, dt, lam):
+    ### Initializing list of squares, deriving probability matrix from sample. 
+    ### Initializing current and initial probability distributions, and new counts dictionary.
+    squares = []
+    curr_prob = []
+    prob_og = []
+    new_counts = {}
+    total = sum(sample.values())
+    for i in range(dim1):
+        for j in range(dim2):
+            squares.append((i,j))
+            prob_og.append(init_matrix[i,j])
+            new_counts[(i,j)] = 0
+    for index, val in enumerate(squares):
+        curr_prob.append(sample[val] / total)
+
+    ### Initializing cost matrix and solving optimal transport
+    cost_matrix = np.ones([dim1*dim2,dim1*dim2])
+    for (index_1, (i,j)) in enumerate(squares):
+        for (index_2, (a,b)) in enumerate(squares):
+            cost_matrix[index_1,index_2] = np.sqrt((a-i)**2+(b-j)**2)
+    T = ot.sinkhorn(np.array(curr_prob),np.array(prob_og),cost_matrix, 1)
 
     ### Moving each particle 
     for index, square in enumerate(squares):
@@ -381,7 +507,7 @@ def BM_from_sample(sample, dt):
 The distribution is visualized by a sample of size num. """    
 ### Good example for spiral: i = 35, j = 38. Generally, look for something in the support of [matrix].
 def see_coupling(matrix, init_matrix, i_coord, j_coord, num):
-    new_matrix = np.matrix(np.ones([dim1,dim2]))
+    new_matrix = np.ones([dim1,dim2])
     squares = []
     prob_curr = []
     prob_og = []
@@ -390,7 +516,7 @@ def see_coupling(matrix, init_matrix, i_coord, j_coord, num):
             squares.append((i,j))
             prob_curr.append(matrix[i,j])
             prob_og.append(init_matrix[i,j])
-    cost_matrix = np.matrix((np.ones([dim1*dim2,dim1*dim2])))
+    cost_matrix = np.ones([dim1*dim2,dim1*dim2])
     for (index_1, (i,j)) in enumerate(squares):
         for (index_2, (a,b)) in enumerate(squares):
             cost_matrix[index_1,index_2] = np.sqrt((a-i)**2+(b-j)**2)
@@ -423,6 +549,17 @@ def simulate_SDE(prob_matrix, init_sample, dt, lam, steps, N):
         new_matrix_dict = updated_matrix 
     return new_matrix_dict
 
+def simulate_entropic_SDE(prob_matrix, init_sample, dt, lam, steps, N):
+    init_matrix_dict = {}
+    for i in range(dim1):
+        for j in range(dim2):
+            init_matrix_dict[(i,j)] =init_sample[i,j] * N
+    new_matrix_dict = init_matrix_dict
+    for _ in range(steps):
+        updated_matrix = entropic_SDE_from_sample(new_matrix_dict, prob_matrix, dt, lam)
+        new_matrix_dict = updated_matrix 
+    return new_matrix_dict
+
 
 
 ### Given a probability matrix, takes a sample of size m and performs simulate_SDE.
@@ -443,7 +580,7 @@ def test_SDE(prob_matrix, dt, lam, steps, N, m):
     for index, val in enumerate(sample):
         counts[squares[val]] += 1
     
-    init_matrix = np.matrix((np.ones([dim1,dim2])))
+    init_matrix = np.ones([dim1,dim2])
     for i in range(dim1):
         for j in range(dim2):
             init_matrix[i,j] = counts[(i,j)]
@@ -451,7 +588,52 @@ def test_SDE(prob_matrix, dt, lam, steps, N, m):
     output_matrix = simulate_SDE(prob_matrix, counts, dt, lam, steps, N)
     
     ### Initialize cost matrix
-    cost_matrix = np.matrix((np.ones([dim1*dim2,dim1*dim2])))
+    cost_matrix = np.ones([dim1*dim2,dim1*dim2])
+    for (index_1, (i,j)) in enumerate(squares):
+        for (index_2, (a,b)) in enumerate(squares):
+            cost_matrix[index_1,index_2] = np.sqrt((a-i)**2+(b-j)**2)
+    
+    ### Turn original sample and output sample into probability distributions
+    og_emp = []
+    output_emp = []
+    prob_list = []
+    for i in range(dim1):
+        for j in range(dim2):
+            og_emp.append(counts[(i,j)] / m)  
+            output_emp.append(output_matrix[(i,j)]/(N*m))
+            prob_list.append(prob_matrix[i,j])
+    
+    og_dist = ot.emd2(prob_list, og_emp, cost_matrix)
+    new_dist = ot.emd2(prob_list, output_emp, cost_matrix)
+    change = (new_dist-og_dist) / og_dist
+    print("Original OT distance: "+ str(og_dist))
+    print("New OT distance: " +str(new_dist))
+    print("percentage change = " + str(100*change))
+    return output_matrix
+
+def test_entropic_SDE(prob_matrix, dt, lam, steps, N, m):
+    ### Take sample from prob_matrix
+    squares = []
+    probabilities = []
+    counts = {}
+    for i in range(dim1):
+        for j in range(dim2):
+            squares.append((i,j))
+            probabilities.append(prob_matrix[i,j])
+            counts[(i,j)] = 0
+    sample = np.random.choice(len(squares), m, p=probabilities)
+    for index, val in enumerate(sample):
+        counts[squares[val]] += 1
+    
+    init_matrix = np.ones([dim1,dim2])
+    for i in range(dim1):
+        for j in range(dim2):
+            init_matrix[i,j] = counts[(i,j)]
+    
+    output_matrix = simulate_entropic_SDE(prob_matrix, counts, dt, lam, steps, N)
+    
+    ### Initialize cost matrix
+    cost_matrix = np.ones([dim1*dim2,dim1*dim2])
     for (index_1, (i,j)) in enumerate(squares):
         for (index_2, (a,b)) in enumerate(squares):
             cost_matrix[index_1,index_2] = np.sqrt((a-i)**2+(b-j)**2)
@@ -475,8 +657,211 @@ def test_SDE(prob_matrix, dt, lam, steps, N, m):
     return output_matrix
 
 
+def test_SDE_from_sample(sample, prob_matrix, dt, lam, steps, N):
+    ### Initializing
+    squares = []
+    probabilities = []
+    counts = sample
+    for i in range(dim1):
+        for j in range(dim2):
+            squares.append((i,j))
+    init_matrix = np.ones([dim1,dim2])
+    for i in range(dim1):
+        for j in range(dim2):
+            init_matrix[i,j] = counts[(i,j)]
+
+    ### Simulation
+    output_matrix = simulate_SDE(prob_matrix, counts, dt, lam, steps, N)
+    
+    ### Initialize cost matrix
+    cost_matrix = np.ones([dim1*dim2,dim1*dim2])
+    for (index_1, (i,j)) in enumerate(squares):
+        for (index_2, (a,b)) in enumerate(squares):
+            cost_matrix[index_1,index_2] = np.sqrt((a-i)**2+(b-j)**2)
+    
+    ### Turn original sample and output sample into probability distributions
+    og_emp = []
+    output_emp = []
+    prob_list = []
+    for i in range(dim1):
+        for j in range(dim2):
+            og_emp.append(counts[(i,j)] / init_matrix.sum())  
+            output_emp.append(output_matrix[(i,j)]/(N*init_matrix.sum()))
+            prob_list.append(prob_matrix[i,j])
+    
+    og_dist = ot.emd2(prob_list, og_emp, cost_matrix)
+    new_dist = ot.emd2(prob_list, output_emp, cost_matrix)
+    change = (-new_dist+og_dist) / og_dist
+    print("Original OT distance: "+ str(og_dist))
+    print("New OT distance: " +str(new_dist))
+    ### print("percentage decrease = " + str(100*change))
+    return 100*change
+    ### return output_matrix
+
+def test_entropic_SDE_from_sample(sample, prob_matrix, dt, lam, steps, N):
+    ### Initializing
+    squares = []
+    probabilities = []
+    counts = sample
+    for i in range(dim1):
+        for j in range(dim2):
+            squares.append((i,j))
+    init_matrix = np.ones([dim1,dim2])
+    for i in range(dim1):
+        for j in range(dim2):
+            init_matrix[i,j] = counts[(i,j)]
+
+    ### Simulation
+    output_matrix = simulate_entropic_SDE(prob_matrix, counts, dt, lam, steps, N)
+    
+    ### Initialize cost matrix
+    cost_matrix = np.ones([dim1*dim2,dim1*dim2])
+    for (index_1, (i,j)) in enumerate(squares):
+        for (index_2, (a,b)) in enumerate(squares):
+            cost_matrix[index_1,index_2] = np.sqrt((a-i)**2+(b-j)**2)
+    
+    ### Turn original sample and output sample into probability distributions
+    og_emp = []
+    output_emp = []
+    prob_list = []
+    for i in range(dim1):
+        for j in range(dim2):
+            og_emp.append(counts[(i,j)] / init_matrix.sum())  
+            output_emp.append(output_matrix[(i,j)]/(N*init_matrix.sum()))
+            prob_list.append(prob_matrix[i,j])
+    
+    og_dist = ot.emd2(prob_list, og_emp, cost_matrix)
+    new_dist = ot.emd2(prob_list, output_emp, cost_matrix)
+    change = (-new_dist+og_dist) / og_dist
+    print("Original OT distance: "+ str(og_dist))
+    print("New OT distance: " +str(new_dist))
+    ### print("percentage decrease = " + str(100*change))
+    return 100*change
+    ### return output_matrix
 
 
+
+
+### TESTING BELOW
+
+### Generate Gaussian
+mean = [30, 30]
+var = [50,50]
+gaussian = np.ones([dim1,dim2])
+for i in range(dim1):
+    for j in range(dim2):
+        exponent = -0.5 * (((i-mean[0])**2 / var[0])+((j-mean[1])**2 / var[1]))
+        gaussian[i,j] = math.exp(exponent)
+total = gaussian.sum()
+for i in range(dim1):
+    for j in range(dim2):
+        gaussian[i,j] = gaussian[i,j] / total
+
+### Generate Mixed Gaussian
+mean_1 = [20,20]     
+mean_2 = [50,50]       
+var_1 = [15,20]       
+var_2 = [20,15]        
+weight_1 = 0.4            
+mixed = np.ones([dim1,dim2])
+for i in range(dim1):
+    for j in range(dim2):
+        exp_1 =  -0.5 * (((i-mean_1[0])**2 / var_1[0])+((j-mean_1[1])**2 / var_1[1]))
+        gaussian[i,j] += math.exp(exp_1)
+        exp_2 =  -0.5 * (((i-mean_2[0])**2 / var_2[0])+((j-mean_2[1])**2 / var_2[1]))
+        gaussian[i,j] += math.exp(exp_2)
+total = mixed.sum()
+for i in range(dim1):
+    for j in range(dim2):
+        mixed[i,j] = mixed[i,j] / total
+
+### Distribution on Circle
+center = [40,40]
+rad_lower = 21
+rad_upper = 24
+circular = np.ones([dim1,dim2])
+for i in range(dim1):
+    for j in range(dim2):
+        if rad_lower**2 < (center[0]-i)**2+(center[1]-j)**2 < rad_upper:
+            circular[i,j] = 1
+circ_total = circular.sum()
+for i in range(dim1):
+    for j in range(dim2):
+        circular[i,j] = circular[i,j]/circ_total
+
+
+
+
+### Generate sample to begin testing
+squares = []
+probabilities = []
+counts = {}
+for i in range(dim1):
+    for j in range(dim2):
+        squares.append((i,j))
+        probabilities.append(mixed[i,j])
+        counts[(i,j)] = 0
+sample = np.random.choice(len(squares), 300, p=probabilities)
+for index, val in enumerate(sample):
+    counts[squares[val]] += 1
+
+
+### Testing
+x = [3,5,7]
+y = []
+y2 = []
+
+show_sample(circular, 300)
+
+for val in x:
+    y.append(test_SDE_from_sample(counts, circular, dt =1, lam = 1, steps = 3, N = val))
+    y2.append(test_entropic_SDE_from_sample(counts, circular, dt=1, lam = 1, steps = 3, N = val))
+    print("Original SDE: ")
+    print(y)
+    print("Entropic SDE: ")
+    print(y2)
+plt.plot(x,y, label = "Original")
+plt.plot(x, y2, label = "Entropic")
+plt.ylabel("percentage decrease in OT distance")
+plt.legend()
+plt.show()
+print(y)
+
+
+
+
+
+
+
+
+### NOTES: 
+### Compare with usual diffusion algorithms, using the same metric 
+### Read paper used for OT algorithm, see if we can speed it up in this context
+### Can we use a neural network to infer Kantorovich potential of true p_0 to true p_t from optimal transport matrix
+### Probability ODE?? (see most recent diffusions paper)  
+
+### Current Tasks:
+###     - Run tests on Gaussian and mixed Gaussian distributions
+###     - Use brute-force grid search to find good values of dt, steps, N, lam
+###     - Read paper to determine how OT solver works, think about speeding up
+###     - Compare our results with usual diffusion algorithms, using OT metric
+###     - Read: Optimal Flow Matching, Input Convex Neural Networks, Maximally Monotone Operators 
+###     - Think about how to learn Kantorovich potentials using neural network
+### Other Goals:
+###     - Architecture for moving program to images
+###     - Given this, how do we sample?? 
+###     - consider using entropic optimal transport to begin with (because we are thinking about samples)
+###     - --> test the two against each other
+###     - --> Note: Kantorovich from Gaussian to Gaussian is known
+###     - we get a noisy transport map that should be a gradient of a quadratic function 
+###         - can do linear regression to figure out actual map 
+### Immediate To-Do:
+###     - write another version with entropic optimal transport
+###         - choose some classes of distributions: mixed gaussians, on a circle, on a spherical shell
+###         - train each one separately (manually)
+###         - see which produces better results 
+###     - see how the diffusion models perform as well (generate empirical distribution)
+###     
 
 
 
