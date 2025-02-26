@@ -4,6 +4,7 @@ import ot
 import math
 import matplotlib.pyplot as plt
 from ot.utils import *
+import pandas as pd
 
 
 """Initializing the image."""
@@ -745,8 +746,8 @@ def test_entropic_SDE_from_sample(sample, prob_matrix, dt, lam, steps, N):
 ### TESTING BELOW
 
 ### Generate Gaussian
-mean = [30, 30]
-var = [50,50]
+mean = [35, 40]
+var = [35,25]
 gaussian = np.ones([dim1,dim2])
 for i in range(dim1):
     for j in range(dim2):
@@ -757,40 +758,54 @@ for i in range(dim1):
     for j in range(dim2):
         gaussian[i,j] = gaussian[i,j] / total
 
+
 ### Generate Mixed Gaussian
 mean_1 = [20,20]     
 mean_2 = [50,50]       
 var_1 = [15,20]       
 var_2 = [20,15]        
 weight_1 = 0.4            
-mixed = np.ones([dim1,dim2])
+mixed = np.zeros([dim1,dim2])
 for i in range(dim1):
     for j in range(dim2):
         exp_1 =  -0.5 * (((i-mean_1[0])**2 / var_1[0])+((j-mean_1[1])**2 / var_1[1]))
-        gaussian[i,j] += math.exp(exp_1)
+        mixed[i,j] += math.exp(exp_1)
         exp_2 =  -0.5 * (((i-mean_2[0])**2 / var_2[0])+((j-mean_2[1])**2 / var_2[1]))
-        gaussian[i,j] += math.exp(exp_2)
-total = mixed.sum()
+        mixed[i,j] += math.exp(exp_2)
+        
+mixed_total = mixed.sum()
+
 for i in range(dim1):
     for j in range(dim2):
-        mixed[i,j] = mixed[i,j] / total
+        mixed[i,j] = mixed[i,j] / mixed_total
+
 
 ### Distribution on Circle
-center = [40,40]
-rad_lower = 21
-rad_upper = 24
+center = [30,30]
+rad_lower = 11
+rad_upper = 14
 circular = np.ones([dim1,dim2])
 for i in range(dim1):
     for j in range(dim2):
-        if rad_lower**2 < (center[0]-i)**2+(center[1]-j)**2 < rad_upper:
+        if rad_lower**2 < (center[0]-i)**2+(center[1]-j)**2 < rad_upper**2:
             circular[i,j] = 1
+        else: 
+            circular[i,j] = 0
 circ_total = circular.sum()
 for i in range(dim1):
     for j in range(dim2):
         circular[i,j] = circular[i,j]/circ_total
 
 
+### Uniform Distribution
+uniform = np.ones([dim1,dim2])
+for i in range(dim1):
+    for j in range(dim2):
+        uniform[i,j] = uniform[i,j] / (dim1*dim2)
 
+
+
+### ACTUAL TESTING BELOW
 
 ### Generate sample to begin testing
 squares = []
@@ -801,31 +816,70 @@ for i in range(dim1):
         squares.append((i,j))
         probabilities.append(mixed[i,j])
         counts[(i,j)] = 0
-sample = np.random.choice(len(squares), 300, p=probabilities)
-for index, val in enumerate(sample):
-    counts[squares[val]] += 1
-
 
 ### Testing
-x = [3,5,7]
+x = [1,2,3]
 y = []
 y2 = []
 
-show_sample(circular, 300)
+"""counts = {}
+for i in range(dim1):
+    for j in range(dim2):
+        counts[(i,j)] = 0
+sample = np.random.choice(len(squares), 300, p=probabilities)
+for index, val in enumerate(sample):
+    counts[squares[val]] += 1"""
 
-for val in x:
-    y.append(test_SDE_from_sample(counts, circular, dt =1, lam = 1, steps = 3, N = val))
-    y2.append(test_entropic_SDE_from_sample(counts, circular, dt=1, lam = 1, steps = 3, N = val))
+
+###show_sample(gaussian, 300)
+
+test_output = test_entropic_SDE(circular, dt=1, lam=1, steps=3, N=2, m=300)
+new_matrix = np.ones([dim1,dim2])
+
+for i in range(dim1):
+    for j in range(dim2):
+        if test_output[(i,j)] > 0:
+            new_matrix[i,j] = 0
+        else:
+            new_matrix[i,j] = 255
+cv2.imshow("photo", new_matrix)
+cv2.waitKey(0)
+cv2.destroyAllWindows()
+
+
+"""
+for nval in x:
+
+    new_counts = {}
+    for i in range(dim1):
+        for j in range(dim2):
+            new_counts[(i,j)] = 0
+    sample = np.random.choice(len(squares), 300, p=probabilities)
+    for index, val in enumerate(sample):
+        new_counts[squares[val]] += 1
+    
+    y.append(test_SDE_from_sample(new_counts, mixed, dt =1, lam = 100, steps = 3, N = nval))
     print("Original SDE: ")
     print(y)
+    
+    y2.append(test_entropic_SDE_from_sample(new_counts, mixed, dt=1, lam = 100, steps = 3, N = nval))
     print("Entropic SDE: ")
     print(y2)
+
 plt.plot(x,y, label = "Original")
 plt.plot(x, y2, label = "Entropic")
 plt.ylabel("percentage decrease in OT distance")
 plt.legend()
 plt.show()
-print(y)
+
+data = []
+for i in range(len(x)):
+    new_row = [x[i],y[i],y2[i]]
+    data.append(new_row)
+datarray = np.array(data)
+
+df = pd.DataFrame(data, columns=["N val","Original SDE OT % Decrease","Entropic SDE OT % Decrease"])
+df.to_csv("MixedExperiment2b.csv",index = False)"""
 
 
 
@@ -834,6 +888,8 @@ print(y)
 
 
 
+
+ 
 ### NOTES: 
 ### Compare with usual diffusion algorithms, using the same metric 
 ### Read paper used for OT algorithm, see if we can speed it up in this context
@@ -861,9 +917,3 @@ print(y)
 ###         - train each one separately (manually)
 ###         - see which produces better results 
 ###     - see how the diffusion models perform as well (generate empirical distribution)
-###     
-
-
-
-
-
