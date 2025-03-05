@@ -178,9 +178,11 @@ def PDE_step(matrix, init_matrix, dt):
             new_matrix[i,j] = new_matrix[i,j] / total
     return(new_matrix)
 
-""""Takes as an input a probability matrix, initial matrix, and a step size and returns a sample from a distribution after taking one step of discretized SDE.""" 
-def SDE_step(matrix, init_matrix, dt, num, lam):
-    ### Initializing list of squares, current & original probabilities, initial sample, and dictionary for output sample.
+
+""""Takes as an input a probability matrix, initial matrix, and a step size and returns a sample from a distribution after taking one step of discretized SDE.
+Also takes as inputs a regularization parameter lambda and a method - standard or entropic optimal transport.""" 
+def general_SDE_step(matrix, init_matrix, dt, num, lam, method, sinkhorn_reg=1, reg_og = 1, reg_sample = 1):
+        ### Initializing list of squares, current & original probabilities, initial sample, and dictionary for output sample.
     squares = []
     probabilities = []
     prob_og = []
@@ -199,7 +201,12 @@ def SDE_step(matrix, init_matrix, dt, num, lam):
     for (index_1, (i,j)) in enumerate(squares):
         for (index_2, (a,b)) in enumerate(squares):
             cost_matrix[index_1,index_2] = np.sqrt((a-i)**2+(b-j)**2)
-    T = ot.emd(probabilities,prob_og,cost_matrix)
+    if method == "standard":
+        T = ot.emd(probabilities,prob_og,cost_matrix)
+    if method == "entropic":
+        T = ot.sinkhorn(probabilities,prob_og,cost_matrix, sinkhorn_reg)
+    if method == "unbalanced":
+        T = ot.sinkhorn_unbalanced(probabilities, prob_og, cost_matrix, reg = sinkhorn_reg, reg_m = (reg_sample,reg_og))
 
     ### Initializing sample from current prob. distribution
     sample = np.random.choice(len(squares), num, p=probabilities)
@@ -238,73 +245,12 @@ def SDE_step(matrix, init_matrix, dt, num, lam):
             else:
                 new_y = np.round(new_y,0)
             new_counts[(new_x,new_y)]+=1
-    return new_counts
+    return new_counts  
 
 
-"""Like SDE_step, but with entropy-regularized optimal transport."""
-def entropic_SDE_step(matrix, init_matrix, dt, num, lam):
-    ### Initializing list of squares, current & original probabilities, initial sample, and dictionary for output sample.
-    squares = []
-    probabilities = []
-    prob_og = []
-    counts = {}
-    new_counts = {}
-    for i in range(dim1):
-        for j in range(dim2):
-            squares.append((i,j))
-            probabilities.append(matrix[i,j])
-            counts[(i,j)] = 0
-            new_counts[(i,j)] = 0
-            prob_og.append(init_matrix[i,j])
-
-    ### Initializing cost matrix and solving optimal transport
-    cost_matrix = np.ones([dim1*dim2,dim1*dim2])
-    for (index_1, (i,j)) in enumerate(squares):
-        for (index_2, (a,b)) in enumerate(squares):
-            cost_matrix[index_1,index_2] = np.sqrt((a-i)**2+(b-j)**2)
-    T = ot.sinkhorn(probabilities,prob_og,cost_matrix, 1)
-
-    ### Initializing sample from current prob. distribution
-    sample = np.random.choice(len(squares), num, p=probabilities)
-    for index, val in enumerate(sample):
-        counts[squares[val]] += 1
-    
-    ### Moving each particle 
-    for index, square in enumerate(squares):
-        for _ in range(counts[square]):
-            x_0 = square[0]
-            y_0 = square[1]
-            B_x = np.random.normal(0,dt)
-            B_y = np.random.normal(0,dt)
-            row = T[index]
-            x_sum = 0
-            y_sum = 0
-            if row.sum() == 0:
-                x_sum = x_0
-                y_sum = y_0
-            elif row.sum() > 0 : 
-                for index, (i,j) in enumerate(squares):
-                    x_sum += (row[index]*i)/row.sum()
-                    y_sum += (row[index]*j)/row.sum()
-            new_x = x_0 - lam*dt*(2*x_0-2*x_sum)+np.sqrt(2)*B_x
-            new_y = y_0 - lam*dt*(2*y_0-2*y_sum)+np.sqrt(2)*B_y
-            if new_x < 0:
-                new_x = 0
-            elif new_x >= dim1-0.5:
-                new_x = dim1-1
-            else:
-                new_x = np.round(new_x,0)
-            if new_y < 0:
-                new_y = 0
-            elif new_y >= dim2-0.5:
-                new_y = dim2-1
-            else:
-                new_y = np.round(new_y,0)
-            new_counts[(new_x,new_y)]+=1
-    return new_counts    
 
 """Performs one step of the SDE given a matrix of particle locations (dictionary) instead of a probability matrix. """
-def SDE_from_sample(sample, init_matrix, dt, lam):
+def general_SDE_from_sample(sample, init_matrix, dt, lam, method, sinkhorn_reg=1, reg_og = 1, reg_sample = 1, warm_start = None):
     ### Initializing list of squares, deriving probability matrix from sample. 
     ### Initializing current and initial probability distributions, and new counts dictionary.
     squares = []
@@ -325,7 +271,12 @@ def SDE_from_sample(sample, init_matrix, dt, lam):
     for (index_1, (i,j)) in enumerate(squares):
         for (index_2, (a,b)) in enumerate(squares):
             cost_matrix[index_1,index_2] = np.sqrt((a-i)**2+(b-j)**2)
-    T = ot.emd(curr_prob,prob_og,cost_matrix)
+    if method == "entropic":
+        T = ot.sinkhorn(np.array(curr_prob),np.array(prob_og),cost_matrix, sinkhorn_reg)
+    if method == "standard":
+        T = ot.emd(curr_prob,prob_og,cost_matrix)
+    if method == "unbalanced":
+        T = ot.sinkhorn_unbalanced(probabilities, prob_og, cost_matrix, reg = sinkhorn_reg, reg_m = (reg_sample,reg_og))
 
     ### Moving each particle 
     for index, square in enumerate(squares):
@@ -361,64 +312,6 @@ def SDE_from_sample(sample, init_matrix, dt, lam):
             new_counts[(new_x,new_y)]+=1
     return new_counts
 
-
-"""Like SDE_from_sample, but with entropic regularization. """
-def entropic_SDE_from_sample(sample, init_matrix, dt, lam):
-    ### Initializing list of squares, deriving probability matrix from sample. 
-    ### Initializing current and initial probability distributions, and new counts dictionary.
-    squares = []
-    curr_prob = []
-    prob_og = []
-    new_counts = {}
-    total = sum(sample.values())
-    for i in range(dim1):
-        for j in range(dim2):
-            squares.append((i,j))
-            prob_og.append(init_matrix[i,j])
-            new_counts[(i,j)] = 0
-    for index, val in enumerate(squares):
-        curr_prob.append(sample[val] / total)
-
-    ### Initializing cost matrix and solving optimal transport
-    cost_matrix = np.ones([dim1*dim2,dim1*dim2])
-    for (index_1, (i,j)) in enumerate(squares):
-        for (index_2, (a,b)) in enumerate(squares):
-            cost_matrix[index_1,index_2] = np.sqrt((a-i)**2+(b-j)**2)
-    T = ot.sinkhorn(np.array(curr_prob),np.array(prob_og),cost_matrix, 1)
-
-    ### Moving each particle 
-    for index, square in enumerate(squares):
-        for _ in range(sample[square]):
-            x_0 = square[0]
-            y_0 = square[1]
-            B_x = np.random.normal(0,dt)
-            B_y = np.random.normal(0,dt)
-            row = T[index]
-            x_sum = 0
-            y_sum = 0
-            if row.sum() == 0:
-                x_sum = x_0
-                y_sum = y_0
-            elif row.sum() > 0 : 
-                for index, (i,j) in enumerate(squares):
-                    x_sum += (row[index]*i)/row.sum()
-                    y_sum += (row[index]*j)/row.sum()
-            new_x = x_0 - lam*dt*(2*x_0-2*x_sum)+np.sqrt(2)*B_x
-            new_y = y_0 - lam*dt*(2*y_0-2*y_sum)+np.sqrt(2)*B_y
-            if new_x < 0:
-                new_x = 0
-            elif new_x >= dim1-0.5:
-                new_x = dim1-1
-            else:
-                new_x = np.round(new_x,0)
-            if new_y < 0:
-                new_y = 0
-            elif new_y >= dim2-0.5:
-                new_y = dim2-1
-            else:
-                new_y = np.round(new_y,0)
-            new_counts[(new_x,new_y)]+=1
-    return new_counts
 
 """Like SDE_step, but with no drift term (i.e. no optimal transport). 
 Only moves particles according to Brownian motion. """
@@ -539,25 +432,15 @@ def see_coupling(matrix, init_matrix, i_coord, j_coord, num):
 ### a step size dt, a weighting parameter lam, a number of steps, and a factor of N
 ### for scaling up the sample, takes steps according to SDE_from_sample and returns the matrix of particles.
 ### All sample matrices represented as dictionaries.
-def simulate_SDE(prob_matrix, init_sample, dt, lam, steps, N):
-    init_matrix_dict = {}
-    for i in range(dim1):
-        for j in range(dim2):
-            init_matrix_dict[(i,j)] =init_sample[i,j] * N
-    new_matrix_dict = init_matrix_dict
-    for _ in range(steps):
-        updated_matrix = SDE_from_sample(new_matrix_dict, prob_matrix, dt, lam)
-        new_matrix_dict = updated_matrix 
-    return new_matrix_dict
 
-def simulate_entropic_SDE(prob_matrix, init_sample, dt, lam, steps, N):
+def general_simulate_SDE(prob_matrix, init_sample, dt, lam, steps, N, method, sinkhorn_reg=1, reg_og = 1, reg_sample = 1, warm_start = False):
     init_matrix_dict = {}
     for i in range(dim1):
         for j in range(dim2):
             init_matrix_dict[(i,j)] =init_sample[i,j] * N
     new_matrix_dict = init_matrix_dict
     for _ in range(steps):
-        updated_matrix = entropic_SDE_from_sample(new_matrix_dict, prob_matrix, dt, lam)
+        updated_matrix = general_SDE_from_sample(new_matrix_dict, prob_matrix, dt, lam, method = method, sinkhorn_reg = sinkhorn_reg, reg_og = reg_og, reg_sample=reg_sample)
         new_matrix_dict = updated_matrix 
     return new_matrix_dict
 
@@ -567,7 +450,7 @@ def simulate_entropic_SDE(prob_matrix, init_sample, dt, lam, steps, N):
 ### Then shows final result and prints OT distance between prob_matrix and 
 ### empirical sample, and between prob_matrix and output empirical distribution.
 
-def test_SDE(prob_matrix, dt, lam, steps, N, m):
+def general_test_SDE(prob_matrix, dt, lam, steps, N, m, method, sinkhorn_reg=1, reg_og = 1, reg_sample = 1, warm_start = False):
     ### Take sample from prob_matrix
     squares = []
     probabilities = []
@@ -586,52 +469,7 @@ def test_SDE(prob_matrix, dt, lam, steps, N, m):
         for j in range(dim2):
             init_matrix[i,j] = counts[(i,j)]
     
-    output_matrix = simulate_SDE(prob_matrix, counts, dt, lam, steps, N)
-    
-    ### Initialize cost matrix
-    cost_matrix = np.ones([dim1*dim2,dim1*dim2])
-    for (index_1, (i,j)) in enumerate(squares):
-        for (index_2, (a,b)) in enumerate(squares):
-            cost_matrix[index_1,index_2] = np.sqrt((a-i)**2+(b-j)**2)
-    
-    ### Turn original sample and output sample into probability distributions
-    og_emp = []
-    output_emp = []
-    prob_list = []
-    for i in range(dim1):
-        for j in range(dim2):
-            og_emp.append(counts[(i,j)] / m)  
-            output_emp.append(output_matrix[(i,j)]/(N*m))
-            prob_list.append(prob_matrix[i,j])
-    
-    og_dist = ot.emd2(prob_list, og_emp, cost_matrix)
-    new_dist = ot.emd2(prob_list, output_emp, cost_matrix)
-    change = (new_dist-og_dist) / og_dist
-    print("Original OT distance: "+ str(og_dist))
-    print("New OT distance: " +str(new_dist))
-    print("percentage change = " + str(100*change))
-    return output_matrix
-
-def test_entropic_SDE(prob_matrix, dt, lam, steps, N, m):
-    ### Take sample from prob_matrix
-    squares = []
-    probabilities = []
-    counts = {}
-    for i in range(dim1):
-        for j in range(dim2):
-            squares.append((i,j))
-            probabilities.append(prob_matrix[i,j])
-            counts[(i,j)] = 0
-    sample = np.random.choice(len(squares), m, p=probabilities)
-    for index, val in enumerate(sample):
-        counts[squares[val]] += 1
-    
-    init_matrix = np.ones([dim1,dim2])
-    for i in range(dim1):
-        for j in range(dim2):
-            init_matrix[i,j] = counts[(i,j)]
-    
-    output_matrix = simulate_entropic_SDE(prob_matrix, counts, dt, lam, steps, N)
+    output_matrix = general_simulate_SDE(prob_matrix, counts, dt, lam, steps, N, method = method, sinkhorn_reg=sinkhorn_reg, reg_og=reg_og, reg_sample = reg_sample)
     
     ### Initialize cost matrix
     cost_matrix = np.ones([dim1*dim2,dim1*dim2])
@@ -658,7 +496,7 @@ def test_entropic_SDE(prob_matrix, dt, lam, steps, N, m):
     return output_matrix
 
 
-def test_SDE_from_sample(sample, prob_matrix, dt, lam, steps, N):
+def test_SDE_from_sample(sample, prob_matrix, dt, lam, steps, N, method):
     ### Initializing
     squares = []
     probabilities = []
@@ -672,7 +510,7 @@ def test_SDE_from_sample(sample, prob_matrix, dt, lam, steps, N):
             init_matrix[i,j] = counts[(i,j)]
 
     ### Simulation
-    output_matrix = simulate_SDE(prob_matrix, counts, dt, lam, steps, N)
+    output_matrix = general_simulate_SDE(prob_matrix, counts, dt, lam, steps, N, method = method)
     
     ### Initialize cost matrix
     cost_matrix = np.ones([dim1*dim2,dim1*dim2])
@@ -698,48 +536,6 @@ def test_SDE_from_sample(sample, prob_matrix, dt, lam, steps, N):
     ### print("percentage decrease = " + str(100*change))
     return 100*change
     ### return output_matrix
-
-def test_entropic_SDE_from_sample(sample, prob_matrix, dt, lam, steps, N):
-    ### Initializing
-    squares = []
-    probabilities = []
-    counts = sample
-    for i in range(dim1):
-        for j in range(dim2):
-            squares.append((i,j))
-    init_matrix = np.ones([dim1,dim2])
-    for i in range(dim1):
-        for j in range(dim2):
-            init_matrix[i,j] = counts[(i,j)]
-
-    ### Simulation
-    output_matrix = simulate_entropic_SDE(prob_matrix, counts, dt, lam, steps, N)
-    
-    ### Initialize cost matrix
-    cost_matrix = np.ones([dim1*dim2,dim1*dim2])
-    for (index_1, (i,j)) in enumerate(squares):
-        for (index_2, (a,b)) in enumerate(squares):
-            cost_matrix[index_1,index_2] = np.sqrt((a-i)**2+(b-j)**2)
-    
-    ### Turn original sample and output sample into probability distributions
-    og_emp = []
-    output_emp = []
-    prob_list = []
-    for i in range(dim1):
-        for j in range(dim2):
-            og_emp.append(counts[(i,j)] / init_matrix.sum())  
-            output_emp.append(output_matrix[(i,j)]/(N*init_matrix.sum()))
-            prob_list.append(prob_matrix[i,j])
-    
-    og_dist = ot.emd2(prob_list, og_emp, cost_matrix)
-    new_dist = ot.emd2(prob_list, output_emp, cost_matrix)
-    change = (-new_dist+og_dist) / og_dist
-    print("Original OT distance: "+ str(og_dist))
-    print("New OT distance: " +str(new_dist))
-    ### print("percentage decrease = " + str(100*change))
-    return 100*change
-    ### return output_matrix
-
 
 
 
@@ -833,7 +629,7 @@ for index, val in enumerate(sample):
 
 ###show_sample(gaussian, 300)
 
-test_output = test_SDE(circular, dt=1, lam=1, steps=3, N=2, m=300)
+test_output = general_test_SDE(circular, dt=1, lam=1, steps=3, N=2, m=300, method = "entropic", reg_og=10, reg_sample = 10)
 new_matrix = np.ones([dim1,dim2])
 
 for i in range(dim1):
@@ -883,15 +679,19 @@ df.to_csv("MixedExperiment2b.csv",index = False)"""
 
 
 
- 
+#### QUESTIONS:
+#### - do we want to use regularization with Negative entropy or KL divergence in unbalanced method??
+###  - 
+
 ### NOTES: 
 ### Can we use a neural network to infer Kantorovich potential of true p_0 to true p_t from optimal transport matrix
 ### Probability ODE?? (see most recent diffusions paper)  
 
 ### Current Tasks:
-###     - use unbalanced OT solver and compare results  
 ###     - STORE AND PLOT VECTOR FIELDS/transport maps 
 ###     - WRITE CODE TO REVERSE ENGINEER u and v from T for warmstart
+###     - do testing with new additions
+
 ###     - Compare our results with usual diffusion algorithms, using OT metric
 ###     - Read: Optimal Flow Matching, Input Convex Neural Networks, Maximally Monotone Operators 
 ###     - Think about how to learn Kantorovich potentials using neural network
