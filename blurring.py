@@ -743,7 +743,7 @@ def test_entropic_SDE_from_sample(sample, prob_matrix, dt, lam, steps, N):
 
 
 
-### TESTING BELOW
+#### CREATING TOY DISTRIBUTIONS
 
 ### Generate Gaussian
 mean = [35, 40]
@@ -778,7 +778,7 @@ mixed_total = mixed.sum()
 for i in range(dim1):
     for j in range(dim2):
         mixed[i,j] = mixed[i,j] / mixed_total
-
+        
 
 ### Distribution on Circle
 center = [30,30]
@@ -805,7 +805,7 @@ for i in range(dim1):
 
 
 
-### ACTUAL TESTING BELOW
+### TESTING BELOW
 
 ### Generate sample to begin testing
 squares = []
@@ -833,7 +833,7 @@ for index, val in enumerate(sample):
 
 ###show_sample(gaussian, 300)
 
-test_output = test_entropic_SDE(circular, dt=1, lam=1, steps=3, N=2, m=300)
+test_output = test_SDE(circular, dt=1, lam=1, steps=3, N=2, m=300)
 new_matrix = np.ones([dim1,dim2])
 
 for i in range(dim1):
@@ -883,37 +883,21 @@ df.to_csv("MixedExperiment2b.csv",index = False)"""
 
 
 
-
-
-
-
-
-
  
 ### NOTES: 
-### Compare with usual diffusion algorithms, using the same metric 
-### Read paper used for OT algorithm, see if we can speed it up in this context
 ### Can we use a neural network to infer Kantorovich potential of true p_0 to true p_t from optimal transport matrix
 ### Probability ODE?? (see most recent diffusions paper)  
 
 ### Current Tasks:
-###     - Run tests on Gaussian and mixed Gaussian distributions
-###     - Use brute-force grid search to find good values of dt, steps, N, lam
-###     - Read paper to determine how OT solver works, think about speeding up
+###     - use unbalanced OT solver and compare results  
+###     - STORE AND PLOT VECTOR FIELDS/transport maps 
+###     - WRITE CODE TO REVERSE ENGINEER u and v from T for warmstart
 ###     - Compare our results with usual diffusion algorithms, using OT metric
 ###     - Read: Optimal Flow Matching, Input Convex Neural Networks, Maximally Monotone Operators 
 ###     - Think about how to learn Kantorovich potentials using neural network
 ### Other Goals:
 ###     - Architecture for moving program to images
 ###     - Given this, how do we sample?? 
-###     - consider using entropic optimal transport to begin with (because we are thinking about samples)
-###     - --> test the two against each other
-###     - --> Note: Kantorovich from Gaussian to Gaussian is known
 ###     - we get a noisy transport map that should be a gradient of a quadratic function 
 ###         - can do linear regression to figure out actual map 
-### Immediate To-Do:
-###     - write another version with entropic optimal transport
-###         - choose some classes of distributions: mixed gaussians, on a circle, on a spherical shell
-###         - train each one separately (manually)
-###         - see which produces better results 
-###     - see how the diffusion models perform as well (generate empirical distribution)
+
