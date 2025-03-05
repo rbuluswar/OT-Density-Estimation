@@ -253,6 +253,8 @@ def general_SDE_step(matrix, init_matrix, dt, num, lam, method, sinkhorn_reg=1, 
 def general_SDE_from_sample(sample, init_matrix, dt, lam, method, sinkhorn_reg=1, reg_og = 1, reg_sample = 1, warm_start = None):
     ### Initializing list of squares, deriving probability matrix from sample. 
     ### Initializing current and initial probability distributions, and new counts dictionary.
+    vec_field = np.zeros((dim1, dim2, 2))
+
     squares = []
     curr_prob = []
     prob_og = []
@@ -276,10 +278,12 @@ def general_SDE_from_sample(sample, init_matrix, dt, lam, method, sinkhorn_reg=1
     if method == "standard":
         T = ot.emd(curr_prob,prob_og,cost_matrix)
     if method == "unbalanced":
-        T = ot.sinkhorn_unbalanced(probabilities, prob_og, cost_matrix, reg = sinkhorn_reg, reg_m = (reg_sample,reg_og))
+        T = ot.sinkhorn_unbalanced(curr_prob, prob_og, cost_matrix, reg = sinkhorn_reg, reg_m = (reg_sample,reg_og))
 
     ### Moving each particle 
     for index, square in enumerate(squares):
+        x_coords = 0
+        y_coords = 0
         for _ in range(sample[square]):
             x_0 = square[0]
             y_0 = square[1]
@@ -295,8 +299,8 @@ def general_SDE_from_sample(sample, init_matrix, dt, lam, method, sinkhorn_reg=1
                 for index, (i,j) in enumerate(squares):
                     x_sum += (row[index]*i)/row.sum()
                     y_sum += (row[index]*j)/row.sum()
-            new_x = x_0 - lam*dt*(2*x_0-2*x_sum)+np.sqrt(2)*B_x
-            new_y = y_0 - lam*dt*(2*y_0-2*y_sum)+np.sqrt(2)*B_y
+            new_x = x_0 - dt*(2*x_0-2*x_sum)+lam*np.sqrt(2)*B_x
+            new_y = y_0 - dt*(2*y_0-2*y_sum)+lam*np.sqrt(2)*B_y
             if new_x < 0:
                 new_x = 0
             elif new_x >= dim1-0.5:
@@ -310,7 +314,16 @@ def general_SDE_from_sample(sample, init_matrix, dt, lam, method, sinkhorn_reg=1
             else:
                 new_y = np.round(new_y,0)
             new_counts[(new_x,new_y)]+=1
-    return new_counts
+            x_coords += - lam*dt*(2*x_0-2*x_sum)+np.sqrt(2)*B_x
+            y_coords += - lam*dt*(2*y_0-2*y_sum)+np.sqrt(2)*B_y
+        (i,j) = square
+        if sample[square] > 0:
+            vec_field[i,j,0] = x_coords/sample[square]
+            vec_field[i,j,1] = y_coords/sample[square]
+        else:
+            vec_field[i,j,0] = 0
+            vec_field[i,j,1] = 0
+    return (new_counts, vec_field)
 
 
 """Like SDE_step, but with no drift term (i.e. no optimal transport). 
@@ -434,15 +447,17 @@ def see_coupling(matrix, init_matrix, i_coord, j_coord, num):
 ### All sample matrices represented as dictionaries.
 
 def general_simulate_SDE(prob_matrix, init_sample, dt, lam, steps, N, method, sinkhorn_reg=1, reg_og = 1, reg_sample = 1, warm_start = False):
+    vec_fields = []
     init_matrix_dict = {}
     for i in range(dim1):
         for j in range(dim2):
             init_matrix_dict[(i,j)] =init_sample[i,j] * N
     new_matrix_dict = init_matrix_dict
     for _ in range(steps):
-        updated_matrix = general_SDE_from_sample(new_matrix_dict, prob_matrix, dt, lam, method = method, sinkhorn_reg = sinkhorn_reg, reg_og = reg_og, reg_sample=reg_sample)
+        updated_matrix, new_vec_field = general_SDE_from_sample(new_matrix_dict, prob_matrix, dt, lam, method = method, sinkhorn_reg = sinkhorn_reg, reg_og = reg_og, reg_sample=reg_sample)
         new_matrix_dict = updated_matrix 
-    return new_matrix_dict
+        vec_fields.append(new_vec_field)
+    return new_matrix_dict, vec_fields
 
 
 
@@ -464,12 +479,8 @@ def general_test_SDE(prob_matrix, dt, lam, steps, N, m, method, sinkhorn_reg=1, 
     for index, val in enumerate(sample):
         counts[squares[val]] += 1
     
-    init_matrix = np.ones([dim1,dim2])
-    for i in range(dim1):
-        for j in range(dim2):
-            init_matrix[i,j] = counts[(i,j)]
     
-    output_matrix = general_simulate_SDE(prob_matrix, counts, dt, lam, steps, N, method = method, sinkhorn_reg=sinkhorn_reg, reg_og=reg_og, reg_sample = reg_sample)
+    output_matrix, vec_fields = general_simulate_SDE(prob_matrix, counts, dt, lam, steps, N, method = method, sinkhorn_reg=sinkhorn_reg, reg_og=reg_og, reg_sample = reg_sample)
     
     ### Initialize cost matrix
     cost_matrix = np.ones([dim1*dim2,dim1*dim2])
@@ -493,10 +504,10 @@ def general_test_SDE(prob_matrix, dt, lam, steps, N, m, method, sinkhorn_reg=1, 
     print("Original OT distance: "+ str(og_dist))
     print("New OT distance: " +str(new_dist))
     print("percentage change = " + str(100*change))
-    return output_matrix
+    return output_matrix, vec_fields
 
-
-def test_SDE_from_sample(sample, prob_matrix, dt, lam, steps, N, method):
+### Given a sample
+def test_SDE_from_sample(sample, prob_matrix, dt, lam, steps, N, method, sinkhorn_reg = 1, reg_og = 1, reg_sample = 1, warm_start = False):
     ### Initializing
     squares = []
     probabilities = []
@@ -510,7 +521,7 @@ def test_SDE_from_sample(sample, prob_matrix, dt, lam, steps, N, method):
             init_matrix[i,j] = counts[(i,j)]
 
     ### Simulation
-    output_matrix = general_simulate_SDE(prob_matrix, counts, dt, lam, steps, N, method = method)
+    output_matrix, vec_fields = general_simulate_SDE(prob_matrix, counts, dt, lam, steps, N, method = method, sinkhorn_reg = sinkhorn_reg, reg_og = reg_og, reg_sample = reg_sample)
     
     ### Initialize cost matrix
     cost_matrix = np.ones([dim1*dim2,dim1*dim2])
@@ -533,9 +544,9 @@ def test_SDE_from_sample(sample, prob_matrix, dt, lam, steps, N, method):
     change = (-new_dist+og_dist) / og_dist
     print("Original OT distance: "+ str(og_dist))
     print("New OT distance: " +str(new_dist))
-    ### print("percentage decrease = " + str(100*change))
-    return 100*change
-    ### return output_matrix
+    print("percentage decrease = " + str(100*change))
+    return (100*change, output_matrix, vec_fields)
+    
 
 
 
@@ -603,33 +614,9 @@ for i in range(dim1):
 
 ### TESTING BELOW
 
-### Generate sample to begin testing
-squares = []
-probabilities = []
-counts = {}
-for i in range(dim1):
-    for j in range(dim2):
-        squares.append((i,j))
-        probabilities.append(mixed[i,j])
-        counts[(i,j)] = 0
 
 ### Testing
-x = [1,2,3]
-y = []
-y2 = []
-
-"""counts = {}
-for i in range(dim1):
-    for j in range(dim2):
-        counts[(i,j)] = 0
-sample = np.random.choice(len(squares), 300, p=probabilities)
-for index, val in enumerate(sample):
-    counts[squares[val]] += 1"""
-
-
-###show_sample(gaussian, 300)
-
-test_output = general_test_SDE(circular, dt=1, lam=1, steps=3, N=2, m=300, method = "entropic", reg_og=10, reg_sample = 10)
+test_output, vec_fields = general_test_SDE(circular, dt=1, lam=1, steps=3, N=2, m=300, method = "entropic")
 new_matrix = np.ones([dim1,dim2])
 
 for i in range(dim1):
@@ -642,8 +629,41 @@ cv2.imshow("photo", new_matrix)
 cv2.waitKey(0)
 cv2.destroyAllWindows()
 
+### Visualizing vector fields
+field = vec_fields[1]
+X = []
+Y = []
+U = []
+V = []
+for i in range(dim1):
+    for j in range(dim2):
+        if field[i,j,0] != 0 or field[i,j,1] !=0:
+            X.append(- dim1/2 + i)
+            Y.append(dim2/2 - j)
+            U.append(field[i,j,0])
+            V.append(-field[i,j,1])
+plt.quiver(X, Y, U, V, color='b', units='xy', scale=1) 
+plt.xlim(-45, 45) 
+plt.ylim(-45, 45) 
+plt.grid() 
+plt.show() 
 
+
+### For testing/comparing methods while varying one parameter
 """
+squares = []
+probabilities = []
+counts = {}
+for i in range(dim1):
+    for j in range(dim2):
+        squares.append((i,j))
+        probabilities.append(mixed[i,j])
+        counts[(i,j)] = 0
+
+x = [1,2,3]
+y = []
+y2 = []
+
 for nval in x:
 
     new_counts = {}
@@ -681,7 +701,7 @@ df.to_csv("MixedExperiment2b.csv",index = False)"""
 
 #### QUESTIONS:
 #### - do we want to use regularization with Negative entropy or KL divergence in unbalanced method??
-###  - 
+###  - Did I mess up initial placement of factor of lambda? (initially on the optimal transport term and not Brownian motion)
 
 ### NOTES: 
 ### Can we use a neural network to infer Kantorovich potential of true p_0 to true p_t from optimal transport matrix
