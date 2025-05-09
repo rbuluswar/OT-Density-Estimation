@@ -7,7 +7,7 @@ from ot.utils import *
 import pandas as pd
 import time
 
-np.random.seed(50)
+np.random.seed(57)
 
 ### GLOBAL VARIABLES
 dim1 = 64
@@ -20,6 +20,25 @@ cost_matrix = np.ones([dim1*dim2,dim1*dim2])
 for (index_1, (i,j)) in enumerate(squares):
     for (index_2, (a,b)) in enumerate(squares):
         cost_matrix[index_1,index_2] = np.sqrt((a-i)**2+(b-j)**2)
+
+
+
+### Spiral Image
+img_path = "/Users/rohanbuluswar/Desktop/CS_Research/Spiral.png"
+img = cv2.imread(img_path, 0)
+img = cv2.resize(img, (dim1,dim2))
+
+reverse_img = np.ones([dim1,dim2])
+for x in range(dim1):
+    for y in range(dim2):
+        reverse_img[x,y] = (255-img[x,y])
+
+tot = np.sum(reverse_img)
+init_img = np.ones([dim1,dim2])
+for x in range(dim1):
+    for y in range(dim2):
+        init_img[x,y] = reverse_img[x,y]/tot
+
 
 
 def show_sample(matrix, num):
@@ -91,7 +110,27 @@ def recover_diagonals(P, lam, M):
     u = U[:,0]
     v = V[:,0]
     return (np.log(u),np.log(v))
-    pass
+    
+
+def recover_diagonals_iter(P, lam, M, iter):
+    """ 
+    Used to recover the vectors u,v from the Sinkhorn algorithm for use in warmstart.
+    Inputs:
+        P        - dim1*dim2 x dim1*dim2 array, output of the Sinkhorn algorithm
+        lam      - float, weighting parameter
+        M        - dim1*dim2 x dim1*dim2 cost matrix 
+        iter     - number of iterations performed
+    """
+    A = np.ones([dim1*dim2,dim1*dim2]) 
+    for i in range(dim1*dim2):
+        for j in range(dim1*dim2):
+            A[i,j] = P[i,j] / np.exp(-lam * M[i,j])
+    u = np.ones([dim1*dim2])
+    v = np.ones([dim1*dim2])
+    for _ in range(iter):
+        u = A.dot(v) / np.linalg.norm(v)
+        v = A.T.dot(u) / np.linalg.norm(u)
+    return (np.array(np.log(u)),np.array(np.log(v)))
 
 
 """Performs one step of the SDE given a matrix of particle locations (dictionary) instead of a probability matrix. """
@@ -388,12 +427,68 @@ def plot_vector_field(field):
     plt.show()
 
 
+def generate_sample(size,init_sample, dt, lam, steps, method, sinkhorn_reg=1, reg_og = 1, reg_sample = 1, warm_start = False):
+    """
+    Tests the algorithm given an underlying distribution and the hyperparameters by taking sample, measuring OT decrease.
+    Inputs:
+        size               - size of the desired sample
+        init_sample        - dictionary representing given empirical distribution
+        dt                 - float, time step used in discretizing SDE
+        lam                - float, weighting parameter in original optimization problem
+        steps              - integer, number of steps taken
+        N                  - integer, number of copies of each particle taken at beginning
+        method             - specifies if OT is standard, entropic, or unbalanced
+        sinkhorn_reg       - float, regularization parameter in entropic OT
+        reg_og, reg_sample - floats, regularization parameters in unbalanced OT
+        warm_start         - specifies if warmstart functionality of entropic OT is used
+    Returns: 
+        output_matrix      - dictionary; final positions of sampled points
+    """
+    
+    ### Initially sampling from white noise
+    probabilities = []
+    counts = {}
+    for i in range(dim1):
+        for j in range(dim2):
+            probabilities.append(noise[i,j])
+            counts[(i,j)] = 0
+    sample = np.random.choice(len(squares), size, p=probabilities)
+    for index, val in enumerate(sample):
+        counts[squares[val]] += 1
+    
+    warm = warm_start
+
+
+    new_matrix_dict = counts
+    prob_matrix = np.ones([dim1,dim2])
+    total = sum(init_sample.values())
+    for i in range(dim1):
+        for j in range(dim2):
+            prob_matrix[(i,j)] = init_sample[(i,j)] / total
+    u = None
+    v = None
+    for iter in range(steps):
+        print("We are in "+ str(iter))
+        if iter > 0:
+            updated_matrix, _, T = general_SDE_from_sample(new_matrix_dict, prob_matrix, dt, lam, method = method, sinkhorn_reg = sinkhorn_reg, reg_og = reg_og, reg_sample=reg_sample, u_initial = u, v_initial= v, warm_start = warm)
+        if iter == 0:
+            updated_matrix, _, T = general_SDE_from_sample(new_matrix_dict, prob_matrix, dt, lam, method = method, sinkhorn_reg = sinkhorn_reg, reg_og = reg_og, reg_sample=reg_sample, warm_start = False)
+        new_matrix_dict = updated_matrix 
+        
+        if warm:
+            u,v = recover_diagonals_iter(T, lam, cost_matrix, 15)
+
+    return new_matrix_dict
+
+    
+
+
 ### CREATING EXAMPLE DISTRIBUTIONS
 
 
 ### Generate Gaussian
 mean = [35, 40]
-var = [35,25]
+var = [25,15]
 gaussian = np.ones([dim1,dim2])
 for i in range(dim1):
     for j in range(dim2):
@@ -404,6 +499,19 @@ for i in range(dim1):
     for j in range(dim2):
         gaussian[i,j] = gaussian[i,j] / total
 
+
+### White noise as Gaussian
+mean = [dim1/2, dim2/2]
+var = [40,40]
+noise = np.ones([dim1,dim2])
+for i in range(dim1):
+    for j in range(dim2):
+        exponent = -0.5 * (((i-mean[0])**2 / var[0])+((j-mean[1])**2 / var[1]))
+        noise[i,j] = math.exp(exponent)
+total = noise.sum()
+for i in range(dim1):
+    for j in range(dim2):
+        noise[i,j] = noise[i,j] / total
 
 ### Generate Mixed Gaussian
 mean_1 = [20,20]     
@@ -451,10 +559,27 @@ for i in range(dim1):
 
 
 
-#### TESTING
+#### TESTING Density Estimation
 
-start = time.time()
-output_matrix, vec_fields = general_test_SDE(gaussian, dt=1, lam=1, steps=50, N=3, m=300, method="entropic", sinkhorn_reg = 100000, warm_start=True, reg_og =1, reg_sample = 1)
+"""start = time.time()
+output_matrix, vec_fields = general_test_SDE(gaussian, dt=1, lam=0.1, steps=40, N=3, m=300, method="entropic", sinkhorn_reg = 10000, warm_start=True, reg_og =1, reg_sample = 1)
 end = time.time()
 print("Time taken  = " +str(end-start) + " seconds")
-show_empirical(output_matrix)
+show_empirical(output_matrix)"""
+
+
+### TESTING Sampling
+
+probabilities = []
+counts = {}
+for i in range(dim1):
+    for j in range(dim2):
+        probabilities.append(gaussian[i,j])
+        counts[(i,j)] = 0
+sample = np.random.choice(len(squares), 150, p=probabilities)
+for index, val in enumerate(sample):
+    counts[squares[val]] += 1
+
+show_empirical(counts)
+generated = generate_sample(size=600,init_sample=counts, dt=0.1, lam=0.3, steps=40, method="standard", sinkhorn_reg=10000, reg_og = 1, reg_sample = 1, warm_start = False)
+show_empirical(generated)
